@@ -7,7 +7,6 @@
 #include <wlr/config.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_data_device.h>
-#include <wlr/types/wlr_idle.h>
 #include <wlr/types/wlr_idle_notify_v1.h>
 #include <wlr/types/wlr_keyboard_group.h>
 #include <wlr/types/wlr_output_layout.h>
@@ -103,7 +102,6 @@ void seat_idle_notify_activity(struct sway_seat *seat,
 	if ((source & seat->idle_inhibit_sources) == 0) {
 		return;
 	}
-	wlr_idle_notify_activity(server.idle, seat->wlr_seat);
 	wlr_idle_notifier_v1_notify_activity(server.idle_notifier_v1, seat->wlr_seat);
 }
 
@@ -707,12 +705,21 @@ static bool is_touch_or_tablet_tool(struct sway_seat_device *seat_device) {
 	}
 }
 
-static void seat_apply_input_config(struct sway_seat *seat,
+static void seat_apply_input_mapping(struct sway_seat *seat,
 		struct sway_seat_device *sway_device) {
 	struct input_config *ic =
 		input_device_get_config(sway_device->input_device);
 
-	sway_log(SWAY_DEBUG, "Applying input config to %s",
+	switch (sway_device->input_device->wlr_device->type) {
+	case WLR_INPUT_DEVICE_POINTER:
+	case WLR_INPUT_DEVICE_TOUCH:
+	case WLR_INPUT_DEVICE_TABLET_TOOL:
+		break;
+	default:
+		return; // these devices don't support mappings
+	}
+
+	sway_log(SWAY_DEBUG, "Applying input mapping to %s",
 		sway_device->input_device->identifier);
 
 	const char *mapped_to_output = ic == NULL ? NULL : ic->mapped_to_output;
@@ -801,7 +808,6 @@ static void seat_configure_pointer(struct sway_seat *seat,
 	}
 	wlr_cursor_attach_input_device(seat->cursor->cursor,
 		sway_device->input_device->wlr_device);
-	seat_apply_input_config(seat, sway_device);
 	wl_event_source_timer_update(
 			seat->cursor->hide_source, cursor_get_timeout(seat->cursor));
 }
@@ -836,7 +842,6 @@ static void seat_configure_switch(struct sway_seat *seat,
 	if (!seat_device->switch_device) {
 		sway_switch_create(seat, seat_device);
 	}
-	seat_apply_input_config(seat, seat_device);
 	sway_switch_configure(seat_device->switch_device);
 }
 
@@ -844,7 +849,6 @@ static void seat_configure_touch(struct sway_seat *seat,
 		struct sway_seat_device *sway_device) {
 	wlr_cursor_attach_input_device(seat->cursor->cursor,
 		sway_device->input_device->wlr_device);
-	seat_apply_input_config(seat, sway_device);
 }
 
 static void seat_configure_tablet_tool(struct sway_seat *seat,
@@ -855,7 +859,6 @@ static void seat_configure_tablet_tool(struct sway_seat *seat,
 	sway_configure_tablet(sway_device->tablet);
 	wlr_cursor_attach_input_device(seat->cursor->cursor,
 		sway_device->input_device->wlr_device);
-	seat_apply_input_config(seat, sway_device);
 }
 
 static void seat_configure_tablet_pad(struct sway_seat *seat,
@@ -912,6 +915,18 @@ void seat_configure_device(struct sway_seat *seat,
 			seat_configure_tablet_pad(seat, seat_device);
 			break;
 	}
+
+	seat_apply_input_mapping(seat, seat_device);
+}
+
+void seat_configure_device_mapping(struct sway_seat *seat,
+		struct sway_input_device *input_device) {
+	struct sway_seat_device *seat_device = seat_get_device(seat, input_device);
+	if (!seat_device) {
+		return;
+	}
+
+	seat_apply_input_mapping(seat, seat_device);
 }
 
 void seat_reset_device(struct sway_seat *seat,
